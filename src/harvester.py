@@ -282,11 +282,14 @@ class HarvesterOFS(CommonI14YAPI):
         print(f"Changed publication level to Internal for {identifier}")
 
         try:
-            response = self.delete_i14y(dataset_id)
+            self.delete_i14y(dataset_id)
             print(f"Successfully deleted dataset: {identifier}")
         except requests.HTTPError as e:
             code = e.response.status_code if e.response is not None else "?"
             txt = e.response.text if e.response is not None else str(e)
+            if code == 404:
+                print(f"Dataset already deleted (404): {identifier}")
+                return {"status": "deleted", "identifier": identifier, "dataset_id": dataset_id}
             print(f"Failed to delete dataset {identifier}: {code} - {txt}")
             raise
 
@@ -312,18 +315,22 @@ class HarvesterOFS(CommonI14YAPI):
         all_existing_datasets_identifier_id_map = self.get_all_identifier_id_map(all_existing_datasets)
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [
+            futures = {
                 executor.submit(
                     self._process_one_dataset,
                     dataset,
                     all_existing_datasets_identifier_id_map,
                     yesterday,
-                )
+                ): dataset["identifiers"][0]
                 for dataset in datasets
-            ]
+            }
 
             for future in as_completed(futures):
-                result = future.result()
+                identifier_context = futures[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    raise RuntimeError(f"Dataset processing failed for {identifier_context}: {e}") from e
                 status = result["status"]
                 identifier = result["identifier"]
                 dataset_id = result["dataset_id"]
@@ -334,17 +341,21 @@ class HarvesterOFS(CommonI14YAPI):
         datasets_to_delete = set(all_existing_datasets_identifier_id_map.keys()) - current_source_identifiers
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            delete_futures = [
+            delete_futures = {
                 executor.submit(
                     self._delete_one_dataset,
                     identifier,
                     all_existing_datasets_identifier_id_map[identifier],
-                )
+                ): identifier
                 for identifier in datasets_to_delete
-            ]
+            }
 
             for future in as_completed(delete_futures):
-                result = future.result()
+                identifier_context = delete_futures[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    raise RuntimeError(f"Dataset deletion failed for {identifier_context}: {e}") from e
                 identifier = result["identifier"]
                 dataset_id = result["dataset_id"]
                 dataset_status_identifier_id_map["deleted"][identifier] = dataset_id
