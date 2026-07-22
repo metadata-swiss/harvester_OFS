@@ -188,6 +188,16 @@ class HarvesterOFS(CommonI14YAPI):
 
         return response
 
+    @reauth_if_token_expired
+    def get_dataset_i14y(self, dataset_id):
+        headers = {
+            "Authorization": self.api_token,
+            "Accept": "application/json",
+            "User-Agent": I14Y_USER_AGENT,
+        }
+        url = f"{self.api_base_url}/datasets/{dataset_id}"
+        return self.session.get(url, headers=headers, verify=False)
+
     def get_all_identifier_id_map(self, datasets):
         all_existing_datasets_identifier_id_map = {}
         for dataset in datasets:
@@ -290,6 +300,21 @@ class HarvesterOFS(CommonI14YAPI):
             if code == 404:
                 print(f"Dataset already deleted (404): {identifier}")
                 return {"status": "deleted", "identifier": identifier, "dataset_id": dataset_id}
+
+            # Defensive handling for backend inconsistencies where DELETE may return
+            # 403 although the resource is already gone.
+            if code == 403:
+                try:
+                    check_response = self.get_dataset_i14y(dataset_id)
+                    if check_response.status_code == 404:
+                        print(
+                            f"Dataset treated as deleted (DELETE=403, GET=404): {identifier}"
+                        )
+                        return {"status": "deleted", "identifier": identifier, "dataset_id": dataset_id}
+                except requests.RequestException:
+                    # Keep original 403 as source of truth when consistency check fails.
+                    pass
+
             print(f"Failed to delete dataset {identifier}: {code} - {txt}")
             raise
 
@@ -330,6 +355,9 @@ class HarvesterOFS(CommonI14YAPI):
                 try:
                     result = future.result()
                 except Exception as e:
+                    for pending_future in futures:
+                        if pending_future is not future and not pending_future.done():
+                            pending_future.cancel()
                     raise RuntimeError(f"Dataset processing failed for {identifier_context}: {e}") from e
                 status = result["status"]
                 identifier = result["identifier"]
@@ -355,6 +383,9 @@ class HarvesterOFS(CommonI14YAPI):
                 try:
                     result = future.result()
                 except Exception as e:
+                    for pending_future in delete_futures:
+                        if pending_future is not future and not pending_future.done():
+                            pending_future.cancel()
                     raise RuntimeError(f"Dataset deletion failed for {identifier_context}: {e}") from e
                 identifier = result["identifier"]
                 dataset_id = result["dataset_id"]
