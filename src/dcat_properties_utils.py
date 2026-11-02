@@ -382,7 +382,9 @@ def _theme_codes_from_uri(theme_uri, keywords):
 
 def get_themes(graph, subject, predicate, keywords=None):
     """
-    Retrieves unique i14y codes for themes.
+    Retrieves unique EU theme URIs or i14y theme codes.
+
+    With EU_THEMES enabled, source EU URIs are returned directly.
 
     EU data-theme values are treated as the source input. When an EU theme maps
     to several possible DCAT-CH/i14y themes, keywords are used to select only
@@ -391,6 +393,15 @@ def get_themes(graph, subject, predicate, keywords=None):
 
     Important: there is intentionally no default fallback theme.
     """
+    if EU_THEMES:
+        theme_uris = dict.fromkeys(
+            str(theme).strip()
+            for theme in graph.objects(subject, predicate)
+            if isinstance(theme, (URIRef, Literal))
+            and str(theme).strip().startswith(EU_THEME_URI_PREFIX)
+        )
+        return [{"uri": uri} for uri in theme_uris]
+
     unique_codes = set()
     themes = []
 

@@ -1,3 +1,8 @@
+import os
+
+EU_THEMES = os.environ.get("EU_THEMES", "false").strip().lower() == "true"
+EU_THEME_URI_PREFIX = "http://publications.europa.eu/resource/authority/data-theme/"
+
 # i14y theme code mapping.
 #
 # Important: these are i14y DV_DCAT_DATASET_THEME codes, not exact DCAT-CH
